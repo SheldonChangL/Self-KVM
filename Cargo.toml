@@ -1,0 +1,36 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/kvm-proto",
+    "crates/kvm-net",
+    "crates/kvm-core",
+    "crates/kvm-input",
+    "crates/kvm-daemon",
+]
+exclude = ["src-tauri", "ui"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["Self-KVM"]
+repository = "https://github.com/SheldonChangL/Self-KVM"
+
+[workspace.dependencies]
+kvm-proto = { path = "crates/kvm-proto" }
+kvm-core = { path = "crates/kvm-core" }
+kvm-net = { path = "crates/kvm-net" }
+kvm-input = { path = "crates/kvm-input" }
+
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "sync", "macros", "time", "fs"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+lto = "thin"
+strip = true

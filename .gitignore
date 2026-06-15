@@ -1,0 +1,14 @@
+# Rust (Cargo.lock is committed — this workspace ships binaries)
+/target
+**/target
+
+# Node / frontend
+ui/node_modules
+ui/dist
+
+# Tauri generated
+src-tauri/gen
+src-tauri/target
+
+# OS
+.DS_Store

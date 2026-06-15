@@ -1,0 +1,9 @@
+[package]
+name = "kvm-proto"
+description = "Self-KVM wire protocol: framed messages, codec, key tables (Barrier-compatible design)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror.workspace = true

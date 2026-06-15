@@ -1,0 +1,36 @@
+[package]
+name = "kvm-daemon"
+description = "Self-KVM runtime: wires protocol + transport + core state machines + input into runnable server/client, with a headless CLI."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "kvm_daemon"
+path = "src/lib.rs"
+
+[[bin]]
+name = "kvm-daemon"
+path = "src/main.rs"
+
+[dependencies]
+kvm-proto.workspace = true
+kvm-core.workspace = true
+kvm-net.workspace = true
+kvm-input.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[features]
+default = []
+# Enable real OS input capture/injection (rdev + enigo). Off by default so the
+# crate and its tests build without platform input permissions.
+real-input = ["kvm-input/backends"]
+# Enable TLS transport with TOFU fingerprints.
+tls = ["kvm-net/tls"]
+# Enable cross-machine clipboard sync (system clipboard via arboard).
+clipboard = ["kvm-input/backends"]

@@ -1,0 +1,23 @@
+[package]
+name = "kvm-input"
+description = "Self-KVM platform input: capture/injection traits, a mock backend, and (behind the `backends` feature) rdev capture + enigo injection."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+kvm-core.workspace = true
+kvm-proto.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+# Real OS backends are opt-in: they pull in platform crates and need
+# Accessibility / Input Monitoring permissions, so the testable core never
+# depends on them.
+enigo = { version = "0.5", optional = true }
+rdev = { version = "0.5", features = ["unstable_grab"], optional = true }
+arboard = { version = "3", optional = true }
+
+[features]
+default = []
+backends = ["dep:enigo", "dep:rdev", "dep:arboard"]

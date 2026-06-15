@@ -1,0 +1,12 @@
+[package]
+name = "kvm-core"
+description = "Self-KVM domain logic: screen layout, edge detection, coordinate mapping, server/client state machines."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+kvm-proto.workspace = true
+serde = { workspace = true }
+serde_json.workspace = true
+thiserror.workspace = true
