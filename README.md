@@ -134,10 +134,16 @@ cargo test
 # capture input (and Accessibility / Input Monitoring permission on macOS).
 cargo run -p kvm-daemon --features real-input -- server --port 24800
 
-# Run a client on another machine
+# Run a client on another machine. Screen size is auto-detected from the
+# primary display; pass --width/--height only to override.
 cargo run -p kvm-daemon --features real-input -- \
-    client --server 192.168.1.10:24800 --name laptop --width 1280 --height 800
+    client --server 192.168.1.10:24800 --name laptop
 ```
+
+Screen resolutions are detected automatically: the server reads its own display,
+and each client reports its geometry on connect, which the server adopts into the
+layout. A layout config therefore only needs to declare **adjacency** (which
+screen borders which) — not hand-written pixel sizes.
 
 Feature flags on `kvm-daemon`: `real-input` (rdev+enigo), `tls`, `clipboard`.
 

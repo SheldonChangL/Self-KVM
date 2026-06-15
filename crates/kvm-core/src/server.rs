@@ -93,6 +93,17 @@ impl ServerMachine {
         self.active = self.local_screen.clone();
     }
 
+    /// Update a screen's size in the layout — called when a client reports its
+    /// real geometry (`DeviceInfo`) or when the server detects its own display,
+    /// so resolutions are auto-adopted rather than hand-written in the config.
+    /// The layout config then only needs to declare adjacency. No-op if the
+    /// screen isn't in the layout.
+    pub fn set_screen_size(&mut self, screen: &str, w: i32, h: i32) {
+        if let Some(node) = self.layout.nodes.get_mut(screen) {
+            node.size = crate::layout::ScreenSize::new(w, h);
+        }
+    }
+
     /// Force control back to the local screen, releasing any grab. Used when the
     /// active client disconnects so the operator is never stranded on a dead
     /// screen. Returns the actions needed to settle that transition.
@@ -435,6 +446,27 @@ mod tests {
         m.set_lock(false);
         m.handle(LocalEvent::MotionAbs { x: 1920, y: 540 });
         assert!(m.is_remote());
+    }
+
+    #[test]
+    fn set_screen_size_updates_layout_and_crossing() {
+        let mut m = machine();
+        // Client reports a different resolution than the placeholder in config.
+        m.set_screen_size("lap", 2560, 1440);
+        assert_eq!(m.layout().size_of("lap"), Some(ScreenSize::new(2560, 1440)));
+        // The adopted size drives proportional entry mapping on crossing.
+        let actions = m.handle(LocalEvent::MotionAbs { x: 1920, y: 540 });
+        let entry_y = actions.iter().find_map(|a| match a {
+            ServerAction::Send {
+                msg: Message::Enter { y, .. },
+                ..
+            } => Some(*y),
+            _ => None,
+        });
+        assert_eq!(entry_y, Some((540 * 1440 / 1080) as i16)); // 720, not 400
+        // Unknown screen is a no-op.
+        m.set_screen_size("ghost", 800, 600);
+        assert!(m.layout().size_of("ghost").is_none());
     }
 
     #[test]

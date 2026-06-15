@@ -67,3 +67,23 @@ pub trait InputCapture: Send {
 pub mod enigo_backend;
 #[cfg(feature = "backends")]
 pub mod rdev_backend;
+
+/// Best-effort detection of the primary display's size, used to auto-populate
+/// screen geometry so the operator need not hand-write resolutions. Returns
+/// `None` when it can't be determined — no `backends` feature, a headless host,
+/// or a session (e.g. some Wayland setups) that won't report it — in which case
+/// the caller falls back to a configured/default size.
+#[cfg(feature = "backends")]
+pub fn primary_display_size() -> Option<(i32, i32)> {
+    let displays = display_info::DisplayInfo::all().ok()?;
+    let chosen = displays
+        .iter()
+        .find(|d| d.is_primary)
+        .or_else(|| displays.first())?;
+    Some((chosen.width as i32, chosen.height as i32))
+}
+
+#[cfg(not(feature = "backends"))]
+pub fn primary_display_size() -> Option<(i32, i32)> {
+    None
+}

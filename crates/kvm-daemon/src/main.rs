@@ -44,10 +44,12 @@ enum Command {
         server: String,
         #[arg(long)]
         name: String,
-        #[arg(long, default_value_t = 1280)]
-        width: i32,
-        #[arg(long, default_value_t = 800)]
-        height: i32,
+        /// Screen width. Auto-detected from the primary display if omitted.
+        #[arg(long)]
+        width: Option<i32>,
+        /// Screen height. Auto-detected from the primary display if omitted.
+        #[arg(long)]
+        height: Option<i32>,
     },
     /// Send a file to a receiver over a dedicated bulk channel (FTP-style put).
     Send {
@@ -164,6 +166,22 @@ async fn run_server(
         cfg.port = p;
     }
 
+    // Auto-detect this machine's display so the layout config only needs to
+    // declare adjacency, not a hand-written resolution. (Connecting clients
+    // likewise have their reported geometry adopted into the layout.)
+    match kvm_input::primary_display_size() {
+        Some((w, h)) => {
+            if let Some(node) = cfg.layout.nodes.get_mut(&cfg.local_screen) {
+                tracing::info!("detected local screen {:?} = {w}x{h}", cfg.local_screen);
+                node.size = ScreenSize::new(w, h);
+            }
+        }
+        None => tracing::info!(
+            "could not auto-detect local display; using configured size for {:?}",
+            cfg.local_screen
+        ),
+    }
+
     let runtime = ServerRuntime::bind(cfg).await?;
     tracing::info!("listening on {}", runtime.local_addr());
 
@@ -186,13 +204,14 @@ async fn run_server(
 async fn run_client(
     server: String,
     name: String,
-    width: i32,
-    height: i32,
+    width: Option<i32>,
+    height: Option<i32>,
 ) -> anyhow::Result<()> {
+    let (w, h) = resolve_client_size(width, height);
     let cfg = ClientConfig {
         server_addr: server,
         name,
-        screen: ScreenSize::new(width, height),
+        screen: ScreenSize::new(w, h),
         tls: false,
     };
 
@@ -205,6 +224,23 @@ async fn run_client(
 
     let injector = build_injector();
     ClientRuntime::run(cfg, injector, status_tx).await
+}
+
+/// Resolve the client's screen size: explicit `--width/--height` win, otherwise
+/// auto-detect the primary display, otherwise fall back to a safe default.
+/// Handles a single flag being given by detecting only the missing dimension.
+fn resolve_client_size(width: Option<i32>, height: Option<i32>) -> (i32, i32) {
+    if let (Some(w), Some(h)) = (width, height) {
+        return (w, h);
+    }
+    if let Some((dw, dh)) = kvm_input::primary_display_size() {
+        tracing::info!("auto-detected client screen {dw}x{dh}");
+        return (width.unwrap_or(dw), height.unwrap_or(dh));
+    }
+    tracing::warn!(
+        "could not auto-detect display; using 1920x1080 (override with --width/--height)"
+    );
+    (width.unwrap_or(1920), height.unwrap_or(1080))
 }
 
 // --- backend selection ------------------------------------------------------

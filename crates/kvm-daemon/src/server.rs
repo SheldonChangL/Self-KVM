@@ -30,6 +30,9 @@ enum ServerEvent {
     Local(LocalEvent),
     ClientConnected {
         screen: String,
+        /// Geometry the client reported in its `DeviceInfo`, adopted into the
+        /// layout so resolutions need not be hand-written in the config.
+        size: (i32, i32),
         outbound: mpsc::Sender<Message>,
     },
     ClientDisconnected {
@@ -202,7 +205,14 @@ impl ServerRuntime {
                         dispatch(action, &mut clients, hooks.as_mut(), &status).await;
                     }
                 }
-                ServerEvent::ClientConnected { screen, outbound } => {
+                ServerEvent::ClientConnected {
+                    screen,
+                    size,
+                    outbound,
+                } => {
+                    // Adopt the client's reported resolution into the layout so
+                    // crossing maths use real geometry, not config placeholders.
+                    machine.set_screen_size(&screen, size.0, size.1);
                     clients.insert(screen.clone(), outbound);
                     let _ = status.send(ServerStatus::ClientConnected(screen)).await;
                 }
@@ -313,12 +323,13 @@ where
     };
 
     conn.send(&Message::QueryInfo).await?;
-    match conn.recv().await? {
+    let client_size = match conn.recv().await? {
         Message::DeviceInfo { w, h, .. } => {
             tracing::info!("client {name:?} connected ({w}x{h}) from {peer}");
+            (w as i32, h as i32)
         }
         other => bail!("client {name:?}: expected DeviceInfo, got {other:?}"),
-    }
+    };
     conn.send(&Message::InfoAck).await?;
     conn.send(&Message::ResetOptions).await?;
     conn.send(&Message::SetOptions { opts: vec![] }).await?;
@@ -330,6 +341,7 @@ where
     ctl_tx
         .send(ServerEvent::ClientConnected {
             screen: name.clone(),
+            size: client_size,
             outbound: out_tx,
         })
         .await
