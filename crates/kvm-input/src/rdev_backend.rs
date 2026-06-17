@@ -30,13 +30,16 @@ impl InputCapture for RdevCapture {
         // dedicated OS thread. Last cursor position is tracked with interior
         // mutability because the grab callback must be `Fn`, not `FnMut`.
         let last_pos: Arc<Mutex<Option<(f64, f64)>>> = Arc::new(Mutex::new(None));
+        // Screen centre, used to re-home the cursor while grabbing so it never
+        // sits clamped against an edge (which zeroes relative-motion deltas).
+        let center = crate::primary_display_size().map(|(w, h)| (w as f64 / 2.0, h as f64 / 2.0));
 
         thread::Builder::new()
             .name("kvm-capture".into())
             .spawn(move || {
                 let callback = move |event: Event| -> Option<Event> {
                     let grabbing = grab_sw.enabled();
-                    translate(&event, grabbing, &last_pos, &sink);
+                    translate(&event, grabbing, &last_pos, &sink, center);
                     // While grabbing we swallow every event so the local machine
                     // does not also react; otherwise it passes through.
                     if grabbing {
@@ -45,8 +48,11 @@ impl InputCapture for RdevCapture {
                         Some(event)
                     }
                 };
+                tracing::info!("rdev capture thread started; entering grab loop");
                 if let Err(e) = grab(callback) {
                     tracing::error!("rdev grab failed: {e:?} (check Accessibility / input-group permissions)");
+                } else {
+                    tracing::warn!("rdev grab loop returned (capture stopped)");
                 }
             })
             .map_err(|e| InputError::Backend(format!("spawn capture thread: {e}")))?;
@@ -59,19 +65,30 @@ fn translate(
     grabbing: bool,
     last_pos: &Arc<Mutex<Option<(f64, f64)>>>,
     sink: &EventSink,
+    center: Option<(f64, f64)>,
 ) {
     match event.event_type {
         EventType::MouseMove { x, y } => {
             let mut lp = last_pos.lock().unwrap();
             let delta = lp.map(|(px, py)| ((x - px) as i32, (y - py) as i32));
-            *lp = Some((x, y));
             if grabbing {
                 if let Some((dx, dy)) = delta {
                     if dx != 0 || dy != 0 {
                         sink(LocalEvent::MotionRel { dx, dy });
                     }
                 }
+                // Re-home the real cursor to the centre so the next motion is
+                // measured from there and never clamps against an edge. The
+                // baseline becomes the centre to match.
+                match center {
+                    Some((cx, cy)) => {
+                        recenter_cursor(cx, cy);
+                        *lp = Some((cx, cy));
+                    }
+                    None => *lp = Some((x, y)),
+                }
             } else {
+                *lp = Some((x, y));
                 sink(LocalEvent::MotionAbs {
                     x: x as i32,
                     y: y as i32,
@@ -112,6 +129,21 @@ fn translate(
         }
     }
 }
+
+/// Warp the OS cursor to `(x, y)` in global display coordinates. On macOS this
+/// also re-associates the mouse so the ~250 ms post-warp event-suppression
+/// window doesn't stall capture. Other platforms don't clamp the grabbed
+/// cursor the same way, so it's a no-op there.
+#[cfg(target_os = "macos")]
+fn recenter_cursor(x: f64, y: f64) {
+    use core_graphics::display::CGDisplay;
+    use core_graphics::geometry::CGPoint;
+    let _ = CGDisplay::warp_mouse_cursor_position(CGPoint::new(x, y));
+    let _ = CGDisplay::associate_mouse_and_mouse_cursor_position(true);
+}
+
+#[cfg(not(target_os = "macos"))]
+fn recenter_cursor(_x: f64, _y: f64) {}
 
 fn map_button(b: RButton) -> i8 {
     match b {
