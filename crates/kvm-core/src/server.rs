@@ -209,8 +209,14 @@ impl ServerMachine {
         let crossing = if self.switch_locked {
             None // locked to the active screen; ignore edges
         } else {
+            // The local cursor is OS-clamped to 0..=w-1 so it can never reach
+            // `w`; it must cross on the last edge pixel (margin 1). The grabbed
+            // remote cursor is virtual and unclamped, so it crosses only on
+            // truly passing the edge (margin 0) — which also stops it from
+            // re-crossing the instant it enters a screen at coordinate 0.
+            let margin = if self.is_remote() { 0 } else { 1 };
             self.layout
-                .detect_crossing(&self.active, self.cursor_x, self.cursor_y)
+                .detect_crossing(&self.active, self.cursor_x, self.cursor_y, margin)
         };
         match crossing {
             None => {
@@ -231,8 +237,16 @@ impl ServerMachine {
                 let leaving = self.active.clone();
                 let leaving_was_local = leaving == self.local_screen;
                 let entering = crossing.to.clone();
-                self.cursor_x = crossing.entry_x;
-                self.cursor_y = crossing.entry_y;
+                // Returning to the local screen, land a few pixels inside the
+                // edge so the real (clamped) cursor isn't parked on the trigger
+                // pixel and won't immediately bounce back to the client.
+                let (entry_x, entry_y) = if entering == self.local_screen {
+                    self.inset_to_local(crossing.entry_x, crossing.entry_y)
+                } else {
+                    (crossing.entry_x, crossing.entry_y)
+                };
+                self.cursor_x = entry_x;
+                self.cursor_y = entry_y;
 
                 let mut actions = Vec::new();
 
@@ -248,11 +262,11 @@ impl ServerMachine {
 
                 if entering == self.local_screen {
                     // Control returns to the primary: release the grab and put
-                    // the real cursor where it logically re-enters.
+                    // the real cursor where it logically re-enters (inset).
                     actions.push(ServerAction::SetGrab(false));
                     actions.push(ServerAction::WarpCursor {
-                        x: crossing.entry_x,
-                        y: crossing.entry_y,
+                        x: entry_x,
+                        y: entry_y,
                     });
                 } else {
                     // Entering (or hopping to) a client screen. The grab only
@@ -287,6 +301,19 @@ impl ServerMachine {
             screen: self.active.clone(),
             msg,
         }]
+    }
+
+    /// Pull a coordinate a few pixels inside the local screen's edges, so a
+    /// cursor warped home doesn't sit on the crossing-trigger pixel.
+    fn inset_to_local(&self, x: i32, y: i32) -> (i32, i32) {
+        const INSET: i32 = 2;
+        match self.layout.size_of(&self.local_screen) {
+            Some(s) => (
+                x.clamp(INSET, (s.w - 1 - INSET).max(INSET)),
+                y.clamp(INSET, (s.h - 1 - INSET).max(INSET)),
+            ),
+            None => (x, y),
+        }
     }
 
     fn track_modifiers(&mut self, ev: &LocalEvent) {
@@ -424,12 +451,30 @@ mod tests {
                     msg: Message::Leave
                 },
                 ServerAction::SetGrab(false),
-                ServerAction::WarpCursor { x: 1919, y: 540 },
+                // Warped 2px inside srv's right edge (1919 -> 1917) so it does
+                // not immediately re-cross.
+                ServerAction::WarpCursor { x: 1917, y: 540 },
                 ServerAction::ActiveChanged {
                     screen: "srv".into()
                 },
             ]
         );
+    }
+
+    #[test]
+    fn returning_home_does_not_immediately_recross() {
+        let mut m = machine();
+        m.handle(LocalEvent::MotionAbs { x: 1920, y: 540 }); // -> lap
+        m.handle(LocalEvent::MotionRel { dx: -5, dy: 0 }); // back to srv (inset to 1917)
+        assert!(!m.is_remote());
+        // A real cursor reported at the warped-inset position must NOT re-cross.
+        let a = m.handle(LocalEvent::MotionAbs { x: 1917, y: 540 });
+        assert!(a.is_empty(), "cursor inset from the edge should stay home");
+        assert!(!m.is_remote());
+        // Pushing back to the very edge crosses again.
+        let a = m.handle(LocalEvent::MotionAbs { x: 1919, y: 540 });
+        assert!(m.is_remote(), "touching the edge pixel crosses to the client");
+        assert!(a.iter().any(|x| matches!(x, ServerAction::SetGrab(true))));
     }
 
     #[test]

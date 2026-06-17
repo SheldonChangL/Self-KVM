@@ -138,17 +138,23 @@ impl ScreenLayout {
     /// crossings take priority over vertical ones (matches the reference feel
     /// at corners). Returns `None` if the cursor is still on-screen or ran off
     /// an edge with no neighbour.
-    pub fn detect_crossing(&self, active: &str, x: i32, y: i32) -> Option<Crossing> {
+    ///
+    /// `margin` sets how close to the edge counts as crossing. Use `0` for a
+    /// *virtual* cursor that can exceed the bounds (the grabbed remote cursor,
+    /// driven by raw deltas) — it must truly pass the edge. Use `1` for the
+    /// *real* local cursor, which the OS clamps to `0..=w-1`, so it can never
+    /// reach `w`; it crosses on touching the last edge pixel.
+    pub fn detect_crossing(&self, active: &str, x: i32, y: i32, margin: i32) -> Option<Crossing> {
         let node = self.nodes.get(active)?;
         let (w, h) = (node.size.w, node.size.h);
 
-        let edge = if x < 0 {
+        let edge = if x < margin {
             Edge::Left
-        } else if x >= w {
+        } else if x >= w - margin {
             Edge::Right
-        } else if y < 0 {
+        } else if y < margin {
             Edge::Top
-        } else if y >= h {
+        } else if y >= h - margin {
             Edge::Bottom
         } else {
             return None; // still inside
@@ -221,13 +227,13 @@ mod tests {
     #[test]
     fn no_crossing_when_inside() {
         let l = two_screens();
-        assert_eq!(l.detect_crossing("srv", 960, 540), None);
+        assert_eq!(l.detect_crossing("srv", 960, 540, 0), None);
     }
 
     #[test]
     fn right_edge_crosses_into_left_of_neighbour() {
         let l = two_screens();
-        let c = l.detect_crossing("srv", 1920, 540).unwrap();
+        let c = l.detect_crossing("srv", 1920, 540, 0).unwrap();
         assert_eq!(c.to, "lap");
         assert_eq!(c.from_edge, Edge::Right);
         assert_eq!(c.entry_x, 0); // lands on lap's left edge
@@ -235,10 +241,21 @@ mod tests {
     }
 
     #[test]
+    fn local_cursor_crosses_at_last_edge_pixel() {
+        // A real cursor is clamped to 0..=w-1 and can never reach w, so with
+        // margin=1 it must cross on touching the rightmost pixel (1919).
+        let l = two_screens();
+        assert_eq!(l.detect_crossing("srv", 1919, 540, 1).map(|c| c.to), Some("lap".into()));
+        assert_eq!(l.detect_crossing("srv", 1918, 540, 1), None); // one pixel in: still inside
+        // With margin=0 (virtual cursor) the last pixel is NOT yet a crossing.
+        assert_eq!(l.detect_crossing("srv", 1919, 540, 0), None);
+    }
+
+    #[test]
     fn crossing_back_returns_to_origin_edge() {
         let l = two_screens();
         // On lap, moving off the left edge returns to srv's right edge.
-        let c = l.detect_crossing("lap", -1, 400).unwrap();
+        let c = l.detect_crossing("lap", -1, 400, 0).unwrap();
         assert_eq!(c.to, "srv");
         assert_eq!(c.entry_x, 1919); // srv's right edge
         assert_eq!(c.entry_y, 400 * 1080 / 800); // 540
@@ -248,7 +265,7 @@ mod tests {
     fn edge_without_neighbour_yields_none() {
         let l = two_screens();
         // srv has no left neighbour.
-        assert_eq!(l.detect_crossing("srv", -5, 500), None);
+        assert_eq!(l.detect_crossing("srv", -5, 500, 0), None);
     }
 
     #[test]
@@ -257,7 +274,7 @@ mod tests {
         l.add_screen("top", ScreenSize::new(1000, 1000));
         l.add_screen("bot", ScreenSize::new(500, 500));
         l.link("top", Edge::Bottom, "bot");
-        let c = l.detect_crossing("top", 800, 1000).unwrap();
+        let c = l.detect_crossing("top", 800, 1000, 0).unwrap();
         assert_eq!(c.to, "bot");
         assert_eq!(c.entry_y, 0); // top of bot
         assert_eq!(c.entry_x, 800 * 500 / 1000); // 400
