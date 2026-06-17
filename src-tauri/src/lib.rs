@@ -156,12 +156,21 @@ impl Injector for ThreadedInjector {
 async fn start_server(app: AppHandle, setup: ServerSetup) -> Result<(), String> {
     stop_inner(&app);
 
-    let layout = build_layout(&setup.screens);
+    let mut layout = build_layout(&setup.screens);
     if !layout.contains(&setup.local_screen) {
         return Err(format!(
             "this machine's screen {:?} is not in the layout",
             setup.local_screen
         ));
+    }
+    // Use this machine's real display size for the local screen so edge
+    // crossing uses true geometry, not whatever the layout editor guessed.
+    // (Connected clients likewise have their reported size adopted.)
+    if let Some((w, h)) = kvm_input::primary_display_size() {
+        if let Some(node) = layout.nodes.get_mut(&setup.local_screen) {
+            node.size = ScreenSize::new(w, h);
+        }
+        let _ = app.emit("kvm://log", format!("local screen detected {w}x{h}"));
     }
     let config = ServerConfig {
         bind: setup.bind,
